@@ -143,22 +143,86 @@ function setCategory(cat          )       {
     updateTabScores();
 }
 
+function renderBoardBackdropSvg(cat          )         {
+    if (cat === 'defense') {
+        return `<g class="board-backdrop" aria-hidden="true">
+            <!-- Top Panel: 第1の防御 -->
+            <rect x="16" y="10" width="668" height="165" rx="12" fill="#F4F8F7" stroke="#D0DCD8" stroke-width="2"/>
+            <text x="36" y="36" font-size="14" font-weight="700" fill="#2E403B">🛡️ 第1の防御：物理的・化学的防御（皮膚・粘膜・リゾチーム・塩酸）</text>
+            
+            <!-- Middle Panel: 第2の防御 -->
+            <rect x="16" y="185" width="668" height="140" rx="12" fill="#F4F8F7" stroke="#D0DCD8" stroke-width="2"/>
+            <text x="36" y="211" font-size="14" font-weight="700" fill="#2E403B">⚔️ 第2の防御：自然免疫と獲得免疫（一次応答 ↗ 二次応答グラフ曲線）</text>
+            <path d="M 420 280 Q 480 270 530 250 T 630 220" fill="none" stroke="#3B82F6" stroke-width="3" stroke-dasharray="4 4"/>
+            <path d="M 420 280 Q 480 240 530 190 T 630 140" fill="none" stroke="#EF4444" stroke-width="3"/>
+            <text x="560" y="200" font-size="11" font-weight="700" fill="#EF4444">二次応答（急速・大量）</text>
+
+            <!-- Bottom Panel: 免疫関連疾患 -->
+            <rect x="16" y="335" width="668" height="190" rx="12" fill="#F4F8F7" stroke="#D0DCD8" stroke-width="2"/>
+            <text x="36" y="361" font-size="14" font-weight="700" fill="#2E403B">🏥 免疫関連疾患の3分類（強すぎる / 弱すぎる / 標的の誤認）</text>
+        </g>`;
+    } else {
+        return `<g class="board-backdrop" aria-hidden="true">
+            <!-- Full Matrix Panel: ABO式血液型 -->
+            <rect x="16" y="10" width="668" height="516" rx="12" fill="#FDFBF7" stroke="#E6DFD5" stroke-width="2"/>
+            <text x="36" y="38" font-size="15" font-weight="700" fill="#7C2D12">🩸 ABO式血液型と凝集反応 4×4 マトリクス表</text>
+            <!-- Grid lines & headers -->
+            <line x1="36" y1="56" x2="664" y2="56" stroke="#D6CFC4" stroke-width="1.5"/>
+            <line x1="180" y1="56" x2="180" y2="506" stroke="#D6CFC4" stroke-width="1.5"/>
+            <line x1="300" y1="56" x2="300" y2="506" stroke="#D6CFC4" stroke-width="1.5"/>
+            <line x1="430" y1="56" x2="430" y2="506" stroke="#D6CFC4" stroke-width="1.5"/>
+            <text x="100" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#7C2D12">血液型</text>
+            <text x="240" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#7C2D12">凝集原（赤血球）</text>
+            <text x="365" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#7C2D12">凝集素（血漿）</text>
+            <text x="550" y="80" text-anchor="middle" font-size="13" font-weight="700" fill="#7C2D12">試験管判定（抗A / 抗B）</text>
+        </g>`;
+    }
+}
+
 function renderBoardSvg(oniBlankStageId               )       {
     const items = getItemsForCategory(state.category);
-    els.boardSvg.innerHTML = items.map((s) => {
+    const backdropSvg = renderBoardBackdropSvg(state.category);
+    const nodesSvg = items.map((s, idx) => {
         const isBlank = oniBlankStageId !== null ? s.stageId === oniBlankStageId : true;
-        const cls = oniBlankStageId !== null
-            ? (isBlank ? 'stage-node oni-target-blank interactive-target' : 'stage-node solved')
-            : 'stage-node interactive-target masked';
-        const txt = oniBlankStageId !== null ? (isBlank ? '？' : s.name) : '？';
+        let cls = '';
+        let txt = '';
+        let labelDisplay = s.boxLabel;
+
+        if (oniBlankStageId !== null) {
+            if (isBlank) {
+                cls = 'stage-node oni-target-blank interactive-target';
+                txt = state.difficulty === 'oni' ? '【 ？ 】' : '？';
+                if (state.difficulty === 'normal' || state.difficulty === 'oni') {
+                    labelDisplay = `【 ${idx + 1} 】`;
+                }
+            } else {
+                cls = 'stage-node solved';
+                txt = s.name;
+            }
+        } else {
+            cls = 'stage-node interactive-target masked';
+            if (state.difficulty === 'easy') {
+                txt = '？';
+                labelDisplay = s.boxLabel;
+            } else if (state.difficulty === 'normal') {
+                txt = '？';
+                labelDisplay = `【 ${idx + 1} 】`;
+            } else {
+                txt = '？';
+                labelDisplay = `【 ${idx + 1} 】`;
+            }
+        }
+
         return `<g class="${cls}" data-stage="${s.stageId}" tabindex="0" role="button" transform="translate(${s.x}, ${s.y})">
             <g class="stage-visual">
                 <rect class="stage-box ${isBlank && oniBlankStageId ? 'oni-focus-box' : ''}" x="-92" y="-38" width="184" height="76" rx="16" fill="#FFFFFF" stroke="#6F7977" stroke-width="2.5" />
-                <text x="0" y="-14" text-anchor="middle" font-size="12" font-weight="700" fill="#5B6E82">${s.boxLabel}</text>
+                <text x="0" y="-14" text-anchor="middle" font-size="12" font-weight="700" fill="#5B6E82">${labelDisplay}</text>
                 <text class="stage-label" x="0" y="14" text-anchor="middle" font-size="16" font-weight="800" fill="#161D1C">${txt}</text>
             </g>
         </g>`;
     }).join('');
+
+    els.boardSvg.innerHTML = backdropSvg + nodesSvg;
 }
 
 function startGame(difficulty            )       {
