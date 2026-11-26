@@ -67,8 +67,6 @@ const els = {
     overlayHomeBtn: byId<HTMLButtonElement>('overlay-home-btn')
 };
 
-function keyFor(cat: Category): 'cycle' | 'sketch' { return cat === 'defense' ? 'cycle' : 'sketch'; }
-
 function init(): void {
     els.categoryTabs.forEach((tab) => tab.addEventListener('click', () => {
         SOUND_FX.playTap();
@@ -119,11 +117,11 @@ function syncMute(): void {
 
 function updateTabScores(): void {
     [['defense', els.tabScore1], ['abo', els.tabScore2]].forEach(([c, el]) => {
-        const s = progress.getOniBest(keyFor(c as Category));
+        const s = progress.getOniBest(c as Category);
         if (s !== null) { (el as HTMLElement).textContent = `👹 ${s}問`; (el as HTMLElement).hidden = false; }
         else (el as HTMLElement).hidden = true;
     });
-    const saved = progress.getOniBest(keyFor(state.category));
+    const saved = progress.getOniBest(state.category);
     if (saved === null) { els.earnedTitleBanner.hidden = true; return; }
     const r = getOniRankInfo(saved);
     els.earnedTitleBanner.className = `earned-title-banner ${r.className}`;
@@ -139,7 +137,7 @@ function setCategory(cat: Category): void {
         tab.setAttribute('aria-selected', String(a));
     });
     els.homeDesc.textContent = CATEGORY_CONFIG[cat].description;
-    const unlocked = progress.isOniUnlocked(keyFor(cat));
+    const unlocked = progress.isOniUnlocked(cat);
     els.ruleOniItem.hidden = !unlocked;
     els.btnOni.hidden = !unlocked;
     updateTabScores();
@@ -301,7 +299,7 @@ function showToast(msg: string): void {
 function handleGameClear(): void {
     state.isPlaying = false;
     let unlockedNow = false;
-    const k = keyFor(state.category);
+    const k = state.category;
     if (state.difficulty === 'normal' && !progress.isOniUnlocked(k)) {
         progress.unlockOni(k); state.justUnlockedOni = true; unlockedNow = true;
     }
@@ -315,7 +313,7 @@ function handleGameClear(): void {
 
 function handleOniTimeUp(): void {
     state.isPlaying = false;
-    const k = keyFor(state.category);
+    const k = state.category;
     const prev = progress.getOniBest(k) ?? -1;
     const best = Math.max(prev, state.score);
     if (state.score > prev) progress.setOniBest(k, best);
