@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>免疫と血液型マトリクスマスター</title>
+    <link rel="stylesheet" href="css/style.css?v=20261126-1">
+</head>
+<body>
+<div id="home-screen" class="screen active">
+    <header class="home-top-bar">
+        <div class="category-switcher" role="tablist">
+            <button type="button" id="tab-1" class="category-tab active" role="tab" aria-selected="true" data-category="defense">
+                <span>🛡️ 生体防御 ＆ 免疫疾患で覚える</span><span class="tab-score" id="tab-score-1" hidden></span>
+            </button>
+            <button type="button" id="tab-2" class="category-tab" role="tab" aria-selected="false" data-category="abo">
+                <span>🩸 ABO式血液型マトリクスで覚える</span><span class="tab-score" id="tab-score-2" hidden></span>
+            </button>
+        </div>
+        <button type="button" class="mute-btn" id="home-mute-btn">🔊 音ON</button>
+    </header>
+    <main class="home-body">
+        <section class="home-info">
+            <h1>免疫と血液型マトリクスマスター 🛡️</h1>
+            <div class="earned-title-banner" id="earned-title-banner" hidden></div>
+            <p class="desc" id="home-desc">物理・化学的防御、自然免疫と獲得免疫、免疫関連疾患の分類をマスターしよう！</p>
+            <ul class="rules" id="home-rules">
+                <li class="rule-item"><span class="rule-icon">🔰</span><div><b>かんたん</b>：アイコン ＋ 特徴の説明つき</div></li>
+                <li class="rule-item"><span class="rule-icon">🧪</span><div><b>ふつう</b>：アイコンなし（クリアでおに解放！）</div></li>
+                <li class="rule-item" id="rule-oni-item" hidden><span class="rule-icon">👹</span><div><b>おに</b>：60秒TA（ミス-5秒／5連続正解で+3秒）</div></li>
+            </ul>
+        </section>
+        <section class="home-actions">
+            <div class="mode-buttons">
+                <button type="button" class="mode-btn btn-easy" data-difficulty="easy">🔰 かんたんでスタート</button>
+                <button type="button" class="mode-btn btn-normal" data-difficulty="normal">🧪 ふつうでスタート</button>
+                <button type="button" class="mode-btn btn-oni" id="btn-oni" data-difficulty="oni" hidden>👹 おにでスタート</button>
+            </div>
+            <p class="kbd-help"><span class="kbd-line">⌨️ <kbd>Tab</kbd> 移動　<kbd>Enter</kbd> 決定　<kbd>Esc</kbd> 選択解除　<kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> おに回答</span></p>
+        </section>
+    </main>
+</div>
+<div id="game-screen" class="screen">
+    <header class="header">
+        <button type="button" class="reset-btn" id="home-btn"><span class="reset-icon">🏠</span> ホーム</button>
+        <div class="progress-container" id="progress-container">
+            <div class="timer-badge" id="timer-badge" hidden>⏱️ <span id="timer-text">60</span>秒</div>
+            <div class="combo-badge" id="combo-badge" hidden>🔥 2 COMBO</div>
+            <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+            <div class="score-text" id="score-text">0問</div>
+        </div>
+        <div class="header-right">
+            <div class="mode-display" id="mode-display"></div>
+            <button type="button" class="mute-btn" id="game-mute-btn">🔊</button>
+        </div>
+    </header>
+    <main class="main">
+        <section class="graph-container">
+            <div class="graph-wrapper" id="graph-wrapper">
+                <svg id="board-svg" class="board-svg active-board" viewBox="0 0 700 540" xmlns="http://www.w3.org/2000/svg"></svg>
+            </div>
+        </section>
+        <aside class="tray">
+            <div class="tray-title"><span id="tray-title-text"></span><span class="tray-hint" id="tray-hint"></span></div>
+            <div class="card-list" id="card-list" role="list"></div>
+        </aside>
+    </main>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="clear-overlay">
+    <div class="clear-message-box">
+        <h1 class="clear-title" id="clear-title"></h1>
+        <div class="clear-subtitle" id="clear-subtitle"></div>
+        <div class="clear-actions" id="clear-actions" hidden>
+            <button type="button" class="action-btn action-retry" id="retry-btn">🔄 もう一回</button>
+            <button type="button" class="action-btn action-home" id="overlay-home-btn">🏠 ホームに戻る</button>
+        </div>
+        <div class="auto-return-text" id="auto-return-text">まもなくホーム画面に戻ります...</div>
+    </div>
+</div>
+<script type="module" src="js/app.js?v=20261126-1"></script>
+</body>
+</html>

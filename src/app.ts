@@ -1,0 +1,346 @@
+import { CATEGORY_CONFIG, DIFFICULTY_LABELS, getItemsForCategory, getOniRankInfo } from './data.ts';
+import { byId, bySelector } from './dom.ts';
+import { ONI_BONUS_SECONDS, ONI_PENALTY_SECONDS, ONI_TIME_LIMIT, buildOniQuestion, buildStandardCards, computeRemainingSeconds, isBonusCombo } from './game-logic.ts';
+import { shuffleInPlace } from './random.ts';
+import { createSoundFx } from './sound.ts';
+import { createProgressStore, safeLocalStorage } from './storage.ts';
+import type { Card, Category, Difficulty } from './types.ts';
+
+const storage = safeLocalStorage();
+const progress = createProgressStore(storage);
+const SOUND_FX = createSoundFx(storage);
+
+const state = {
+    category: 'defense' as Category,
+    difficulty: 'easy' as Difficulty,
+    score: 0,
+    combo: 0,
+    maxCombo: 0,
+    totalQuestions: 0,
+    selectedItemId: null as string | null,
+    currentOniStageId: null as string | null,
+    items: [] as Card[],
+    nextUid: 0,
+    timeLeft: ONI_TIME_LIMIT,
+    lastTickSecond: -1,
+    oniEndTime: 0,
+    isPlaying: false,
+    justUnlockedOni: false,
+    timerInterval: null as ReturnType<typeof setInterval> | null,
+    toastTimeout: null as ReturnType<typeof setTimeout> | null,
+    returnTimeout: null as ReturnType<typeof setTimeout> | null
+};
+
+const els = {
+    homeScreen: byId('home-screen'),
+    gameScreen: byId('game-screen'),
+    mainArea: bySelector('.main'),
+    homeDesc: byId('home-desc'),
+    earnedTitleBanner: byId('earned-title-banner'),
+    ruleOniItem: byId('rule-oni-item'),
+    btnOni: byId<HTMLButtonElement>('btn-oni'),
+    homeMuteBtn: byId<HTMLButtonElement>('home-mute-btn'),
+    gameMuteBtn: byId<HTMLButtonElement>('game-mute-btn'),
+    tabScore1: byId('tab-score-1'),
+    tabScore2: byId('tab-score-2'),
+    categoryTabs: document.querySelectorAll<HTMLButtonElement>('.category-tab'),
+    modeButtons: document.querySelectorAll<HTMLButtonElement>('.mode-btn'),
+    homeBtn: byId<HTMLButtonElement>('home-btn'),
+    modeDisplay: byId('mode-display'),
+    trayTitleText: byId('tray-title-text'),
+    trayHint: byId('tray-hint'),
+    progressContainer: byId('progress-container'),
+    timerBadge: byId('timer-badge'),
+    timerText: byId('timer-text'),
+    comboBadge: byId('combo-badge'),
+    scoreText: byId('score-text'),
+    progressFill: byId('progress-fill'),
+    boardSvg: byId<SVGSVGElement>('board-svg'),
+    cardList: byId('card-list'),
+    toast: byId('toast'),
+    clearOverlay: byId('clear-overlay'),
+    clearTitle: byId('clear-title'),
+    clearSubtitle: byId('clear-subtitle'),
+    clearActions: byId('clear-actions'),
+    autoReturnText: byId('auto-return-text'),
+    retryBtn: byId<HTMLButtonElement>('retry-btn'),
+    overlayHomeBtn: byId<HTMLButtonElement>('overlay-home-btn')
+};
+
+function keyFor(cat: Category): 'cycle' | 'sketch' { return cat === 'defense' ? 'cycle' : 'sketch'; }
+
+function init(): void {
+    els.categoryTabs.forEach((tab) => tab.addEventListener('click', () => {
+        SOUND_FX.playTap();
+        const cat = tab.dataset['category'] as Category;
+        setCategory(cat);
+    }));
+    els.modeButtons.forEach((btn) => btn.addEventListener('click', () => {
+        SOUND_FX.playTap();
+        startGame(btn.dataset['difficulty'] as Difficulty);
+    }));
+    els.homeBtn.addEventListener('click', () => { SOUND_FX.playTap(); resetToHome(); });
+    els.overlayHomeBtn.addEventListener('click', () => { SOUND_FX.playTap(); resetToHome(); });
+    els.retryBtn.addEventListener('click', () => { SOUND_FX.playTap(); els.clearOverlay.classList.remove('active'); startGame(state.difficulty); });
+    const mute = () => { SOUND_FX.toggleMute(); syncMute(); };
+    els.homeMuteBtn.addEventListener('click', mute);
+    els.gameMuteBtn.addEventListener('click', mute);
+    syncMute();
+
+    els.boardSvg.addEventListener('click', (e) => {
+        if (!state.isPlaying || state.difficulty === 'oni' || !state.selectedItemId) return;
+        const node = (e.target as Element | null)?.closest<SVGGElement>('.stage-node.interactive-target');
+        if (node) attemptPlace(node.dataset['stage'] ?? '');
+    });
+    els.boardSvg.addEventListener('keydown', (e) => {
+        if ((e.key === 'Enter' || e.key === ' ') && state.isPlaying && state.difficulty !== 'oni') {
+            const node = (e.target as Element | null)?.closest<SVGGElement>('.stage-node.interactive-target');
+            if (node) { e.preventDefault(); attemptPlace(node.dataset['stage'] ?? ''); }
+        }
+    });
+    document.addEventListener('keydown', (e) => {
+        if (!els.gameScreen.classList.contains('active') || !state.isPlaying) return;
+        if (state.difficulty === 'oni' && /^[1-9]$/.test(e.key)) {
+            const t = els.cardList.querySelectorAll<HTMLElement>('.bio-card')[Number(e.key) - 1];
+            if (t) { e.preventDefault(); t.click(); }
+        } else if (e.key === 'Escape' && state.selectedItemId) {
+            state.selectedItemId = null; renderCards();
+        }
+    });
+    setCategory('defense');
+    updateTabScores();
+}
+
+function syncMute(): void {
+    const m = SOUND_FX.isMuted();
+    els.homeMuteBtn.textContent = m ? '🔇 音OFF' : '🔊 音ON';
+    els.gameMuteBtn.textContent = m ? '🔇' : '🔊';
+}
+
+function updateTabScores(): void {
+    [['defense', els.tabScore1], ['abo', els.tabScore2]].forEach(([c, el]) => {
+        const s = progress.getOniBest(keyFor(c as Category));
+        if (s !== null) { (el as HTMLElement).textContent = `👹 ${s}問`; (el as HTMLElement).hidden = false; }
+        else (el as HTMLElement).hidden = true;
+    });
+    const saved = progress.getOniBest(keyFor(state.category));
+    if (saved === null) { els.earnedTitleBanner.hidden = true; return; }
+    const r = getOniRankInfo(saved);
+    els.earnedTitleBanner.className = `earned-title-banner ${r.className}`;
+    els.earnedTitleBanner.textContent = `称号：${r.icon} ${r.title}`;
+    els.earnedTitleBanner.hidden = false;
+}
+
+function setCategory(cat: Category): void {
+    state.category = cat;
+    els.categoryTabs.forEach((tab) => {
+        const a = tab.dataset['category'] === cat;
+        tab.classList.toggle('active', a);
+        tab.setAttribute('aria-selected', String(a));
+    });
+    els.homeDesc.textContent = CATEGORY_CONFIG[cat].description;
+    const unlocked = progress.isOniUnlocked(keyFor(cat));
+    els.ruleOniItem.hidden = !unlocked;
+    els.btnOni.hidden = !unlocked;
+    updateTabScores();
+}
+
+function renderBoardSvg(oniBlankStageId: string | null): void {
+    const items = getItemsForCategory(state.category);
+    els.boardSvg.innerHTML = items.map((s) => {
+        const isBlank = oniBlankStageId !== null ? s.stageId === oniBlankStageId : true;
+        const cls = oniBlankStageId !== null
+            ? (isBlank ? 'stage-node oni-target-blank interactive-target' : 'stage-node solved')
+            : 'stage-node interactive-target masked';
+        const txt = oniBlankStageId !== null ? (isBlank ? '？' : s.name) : '？';
+        return `<g class="${cls}" data-stage="${s.stageId}" tabindex="0" role="button" transform="translate(${s.x}, ${s.y})">
+            <g class="stage-visual">
+                <rect class="stage-box ${isBlank && oniBlankStageId ? 'oni-focus-box' : ''}" x="-92" y="-38" width="184" height="76" rx="16" fill="#FFFFFF" stroke="#6F7977" stroke-width="2.5" />
+                <text x="0" y="-14" text-anchor="middle" font-size="12" font-weight="700" fill="#5B6E82">${s.boxLabel}</text>
+                <text class="stage-label" x="0" y="14" text-anchor="middle" font-size="16" font-weight="800" fill="#161D1C">${txt}</text>
+            </g>
+        </g>`;
+    }).join('');
+}
+
+function startGame(difficulty: Difficulty): void {
+    stopTimers();
+    state.difficulty = difficulty;
+    state.score = 0; state.combo = 0; state.maxCombo = 0;
+    state.selectedItemId = null; state.currentOniStageId = null;
+    state.timeLeft = ONI_TIME_LIMIT; state.lastTickSecond = -1; state.isPlaying = true;
+
+    const isOni = difficulty === 'oni';
+    els.progressContainer.classList.toggle('oni-active', isOni);
+    els.timerBadge.hidden = !isOni;
+    els.scoreText.hidden = !isOni;
+    els.progressFill.classList.toggle('timer-fill', isOni);
+    els.modeDisplay.textContent = `${CATEGORY_CONFIG[state.category].label} / ${DIFFICULTY_LABELS[difficulty]}`;
+
+    if (isOni) {
+        els.trayTitleText.textContent = '❓ ？に入るのは？';
+        els.trayHint.textContent = '👆クリック または 1・2・3キーで回答';
+        nextOni();
+        updateOniHud();
+        state.oniEndTime = Date.now() + ONI_TIME_LIMIT * 1000;
+        state.timerInterval = setInterval(() => {
+            const rem = Math.max(0, state.oniEndTime - Date.now());
+            state.timeLeft = computeRemainingSeconds(state.oniEndTime, Date.now());
+            if (state.timeLeft <= 10 && state.timeLeft > 0 && state.timeLeft !== state.lastTickSecond) {
+                state.lastTickSecond = state.timeLeft; SOUND_FX.playTick();
+            }
+            updateOniHud(rem);
+            if (rem <= 0) { stopTimers(); handleOniTimeUp(); }
+        }, 100);
+    } else {
+        els.trayTitleText.textContent = CATEGORY_CONFIG[state.category].trayTitle;
+        els.trayHint.textContent = '👆カードを選んで図の枠をクリック';
+        renderBoardSvg(null);
+        const built = buildStandardCards(state.category, state.nextUid);
+        state.nextUid = built.nextUid;
+        state.items = shuffleInPlace(built.items);
+        state.totalQuestions = state.items.length;
+        els.progressFill.style.width = '0%';
+        renderCards();
+    }
+    els.homeScreen.classList.remove('active');
+    els.gameScreen.classList.add('active');
+}
+
+function nextOni(): void {
+    const q = buildOniQuestion(state.category, state.currentOniStageId, state.nextUid);
+    state.currentOniStageId = q.target.stageId;
+    state.nextUid = q.nextUid;
+    state.items = q.choices;
+    els.trayTitleText.textContent = q.askHint ? '❓ ？の時期・項目はどれ？' : '❓ ？に入る名称は？';
+    renderBoardSvg(q.target.stageId);
+    renderCards();
+}
+
+function renderCards(): void {
+    els.cardList.innerHTML = '';
+    const isOni = state.difficulty === 'oni';
+    const isEasy = state.difficulty === 'easy';
+    els.cardList.classList.toggle('oni-choices', isOni);
+    state.items.forEach((item, idx) => {
+        const card = document.createElement('div');
+        const sel = state.selectedItemId === item.id;
+        card.className = `bio-card${sel ? ' selected' : ''}`;
+        card.tabIndex = 0;
+        const iconHtml = isEasy ? `<div class="feature-icon">${item.emoji}</div>` : '';
+        const hintHtml = item.hint && !isOni ? `<div class="hint">${item.hint}</div>` : '';
+        card.innerHTML = `${iconHtml}<div class="info"><div class="name">${item.name}</div>${hintHtml}</div>`;
+        if (isOni && idx < 9) card.insertAdjacentHTML('afterbegin', `<span class="key-badge">${idx + 1}</span>`);
+        card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
+        card.addEventListener('click', () => {
+            if (!state.isPlaying) return;
+            if (isOni) {
+                if (item.stageId === state.currentOniStageId) {
+                    state.score++; state.combo++; state.maxCombo = Math.max(state.maxCombo, state.combo);
+                    if (isBonusCombo(state.combo)) { state.oniEndTime += ONI_BONUS_SECONDS * 1000; SOUND_FX.playBonus(); showToast(`🔥 ${state.combo}連続！ +3秒！`); }
+                    else { SOUND_FX.playCorrect(state.combo); showToast('⭕ 正解！'); }
+                    updateOniHud(); nextOni();
+                } else {
+                    state.combo = 0; SOUND_FX.playWrong(); state.oniEndTime -= ONI_PENALTY_SECONDS * 1000;
+                    showToast(`❌ ミス！ -${ONI_PENALTY_SECONDS}秒`);
+                    const rem = Math.max(0, state.oniEndTime - Date.now());
+                    if (rem <= 0) { stopTimers(); handleOniTimeUp(); } else { updateOniHud(rem); nextOni(); }
+                }
+                return;
+            }
+            SOUND_FX.playTap();
+            state.selectedItemId = sel ? null : item.id;
+            renderCards();
+        });
+        els.cardList.appendChild(card);
+    });
+}
+
+function attemptPlace(stageId: string): void {
+    const idx = state.items.findIndex((i) => i.id === state.selectedItemId);
+    if (idx === -1) return;
+    const item = state.items[idx]!;
+    if (item.stageId === stageId) {
+        state.score++;
+        SOUND_FX.playCorrect(1);
+        showToast(`⭕ 正解！ ${item.name}`);
+        const node = els.boardSvg.querySelector<SVGGElement>(`[data-stage="${stageId}"]`);
+        if (node) {
+            node.classList.remove('masked', 'interactive-target');
+            node.classList.add('solved');
+            const lbl = node.querySelector('.stage-label');
+            if (lbl) lbl.textContent = item.name;
+        }
+        state.items.splice(idx, 1);
+        state.selectedItemId = null;
+        els.progressFill.style.width = `${(state.score / state.totalQuestions) * 100}%`;
+        renderCards();
+        if (state.score >= state.totalQuestions) handleGameClear();
+    } else {
+        SOUND_FX.playWrong();
+        showToast('❌ 違うみたい…');
+        state.selectedItemId = null;
+        renderCards();
+    }
+}
+
+function updateOniHud(rem = state.timeLeft * 1000): void {
+    els.timerText.textContent = String(state.timeLeft);
+    els.scoreText.textContent = `🏆 ${state.score}問`;
+    els.progressFill.style.width = `${Math.min(100, (rem / (ONI_TIME_LIMIT * 1000)) * 100)}%`;
+}
+
+function showToast(msg: string): void {
+    els.toast.innerHTML = msg;
+    els.toast.style.backgroundColor = msg.includes('❌') ? 'rgba(239, 68, 68, 0.95)' : 'rgba(13, 148, 136, 0.95)';
+    els.toast.classList.add('show');
+    if (state.toastTimeout !== null) clearTimeout(state.toastTimeout);
+    state.toastTimeout = setTimeout(() => els.toast.classList.remove('show'), 1200);
+}
+
+function handleGameClear(): void {
+    state.isPlaying = false;
+    let unlockedNow = false;
+    const k = keyFor(state.category);
+    if (state.difficulty === 'normal' && !progress.isOniUnlocked(k)) {
+        progress.unlockOni(k); state.justUnlockedOni = true; unlockedNow = true;
+    }
+    SOUND_FX.playClear(unlockedNow);
+    els.clearTitle.innerHTML = '🎊 素晴らしい！ 🎊';
+    els.clearSubtitle.innerHTML = unlockedNow ? 'すべてマスターしました！<div class="unlock-message">どこかでとびらがひらいたようだ…！</div>' : 'すべてマスターしました！';
+    els.clearActions.hidden = true; els.autoReturnText.hidden = false;
+    els.clearOverlay.classList.add('active');
+    state.returnTimeout = setTimeout(resetToHome, unlockedNow ? 4500 : 3000);
+}
+
+function handleOniTimeUp(): void {
+    state.isPlaying = false;
+    const k = keyFor(state.category);
+    const prev = progress.getOniBest(k) ?? -1;
+    const best = Math.max(prev, state.score);
+    if (state.score > prev) progress.setOniBest(k, best);
+    updateTabScores();
+    const r = getOniRankInfo(state.score);
+    SOUND_FX.playTimeUp(r.rank === 'S' || r.rank === 'A');
+    els.clearTitle.innerHTML = '⏱️ タイムアップ！';
+    els.clearSubtitle.innerHTML = `<div class="rank-showcase ${r.className}"><span class="rank-letter">${r.rank}</span><span class="rank-title-text">${r.icon} ${r.title}</span></div><div style="font-size:40px;font-weight:900;color:var(--primary);">${state.score}問正解！</div><div>ベスト記録：<b>${best} 問</b></div>`;
+    els.clearActions.hidden = false; els.autoReturnText.hidden = true;
+    els.clearOverlay.classList.add('active');
+}
+
+function stopTimers(): void {
+    if (state.timerInterval !== null) clearInterval(state.timerInterval);
+    if (state.returnTimeout !== null) clearTimeout(state.returnTimeout);
+    state.timerInterval = null; state.returnTimeout = null;
+}
+
+function resetToHome(): void {
+    stopTimers(); state.isPlaying = false;
+    els.clearOverlay.classList.remove('active');
+    els.gameScreen.classList.remove('active');
+    els.homeScreen.classList.add('active');
+    setCategory(state.category);
+    state.justUnlockedOni = false;
+}
+
+init();
