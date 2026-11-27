@@ -80,7 +80,22 @@ function init(): void {
     els.homeBtn.addEventListener('click', () => { SOUND_FX.playTap(); resetToHome(); });
     els.overlayHomeBtn.addEventListener('click', () => { SOUND_FX.playTap(); resetToHome(); });
     els.retryBtn.addEventListener('click', () => { SOUND_FX.playTap(); els.clearOverlay.classList.remove('active'); startGame(state.difficulty); });
-    const mute = () => { SOUND_FX.toggleMute(); syncMute(); };
+    let muteClickTimes: number[] = [];
+    const mute = () => {
+        SOUND_FX.toggleMute();
+        syncMute();
+        const now = Date.now();
+        muteClickTimes = muteClickTimes.filter((t) => now - t <= 3000);
+        muteClickTimes.push(now);
+        if (muteClickTimes.length >= 6) {
+            muteClickTimes = [];
+            (['defense', 'abo'] as const).forEach((cat) => progress.unlockOni(cat));
+            setCategory(state.category);
+            els.btnOni.classList.add('just-unlocked');
+            SOUND_FX.playClear(true);
+            showToast('👹 どこかでとびらがひらいたようだ…！');
+        }
+    };
     els.homeMuteBtn.addEventListener('click', mute);
     els.gameMuteBtn.addEventListener('click', mute);
     syncMute();
